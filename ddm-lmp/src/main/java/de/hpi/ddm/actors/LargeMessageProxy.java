@@ -1,11 +1,16 @@
 package de.hpi.ddm.actors;
 
+import java.io.NotSerializableException;
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
 import akka.actor.Props;
+import akka.io.DirectByteBufferPool;
+import akka.serialization.ByteBufferSerializer;
+import akka.serialization.SerializerWithStringManifest;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -40,7 +45,52 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		private ActorRef sender;
 		private ActorRef receiver;
 	}
-	
+
+	@NoArgsConstructor
+	public static class LargeMessageByteBufSerializer extends SerializerWithStringManifest implements ByteBufferSerializer {
+
+		DirectByteBufferPool pool = new akka.io.DirectByteBufferPool( 1024 * 1024, 10);
+
+		@Override
+		public int identifier() {
+			return 1337;
+		}
+
+		@Override
+		public String manifest(Object o) {
+			return "serialized-" + o.getClass().getSimpleName();
+		}
+
+		@Override
+		public byte[] toBinary(Object o) {
+			ByteBuffer buf = pool.acquire();
+			try {
+				toBinary(buf);
+				buf.flip();
+				byte[] bytes = new byte[buf.remaining()];
+				buf.get(bytes);
+				return bytes;
+			} finally {
+				pool.release(buf);
+			}
+		}
+
+		@Override
+		public Object fromBinary(byte[] bytes, String manifest) throws NotSerializableException {
+			return fromBinary(ByteBuffer.wrap(bytes), manifest);
+		}
+
+		@Override
+		public void toBinary(Object o, ByteBuffer buf) {
+
+		}
+
+		@Override
+		public Object fromBinary(ByteBuffer buf, String manifest) throws NotSerializableException {
+			return null;
+		}
+	}
+
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -72,6 +122,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// 2. Serialize the object and send its bytes via Akka streaming.
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
+
 		receiverProxy.tell(new BytesMessage<>(message.getMessage(), this.sender(), message.getReceiver()), this.self());
 	}
 
