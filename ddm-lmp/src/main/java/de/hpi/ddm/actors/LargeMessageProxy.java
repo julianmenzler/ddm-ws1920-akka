@@ -63,11 +63,11 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		@Override
 		public byte[] toBinary(Object o) {
-			ByteBuffer buf = pool.acquire();
+			final ByteBuffer buf = pool.acquire();
 			try {
-				toBinary(buf);
+				toBinary(o, buf);
 				buf.flip();
-				byte[] bytes = new byte[buf.remaining()];
+				final byte[] bytes = new byte[buf.remaining()];
 				buf.get(bytes);
 				return bytes;
 			} finally {
