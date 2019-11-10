@@ -10,7 +10,12 @@ import akka.actor.ActorSelection;
 import akka.actor.Props;
 import akka.io.DirectByteBufferPool;
 import akka.serialization.ByteBufferSerializer;
+import akka.serialization.Serialization;
+import akka.serialization.SerializationExtension;
 import akka.serialization.SerializerWithStringManifest;
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.ByteBufferInput;
+import com.esotericsoftware.kryo.io.ByteBufferOutput;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -66,7 +71,10 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 			final ByteBuffer buf = pool.acquire();
 			try {
 				toBinary(o, buf);
+				// flip() makes a buffer ready for a new sequence of channel-write or relative get operations:
+				// It sets the limit to the current position and then sets the position to zero.
 				buf.flip();
+				// Remaining: return the number of elements between the current position and the limit.
 				final byte[] bytes = new byte[buf.remaining()];
 				buf.get(bytes);
 				return bytes;
@@ -82,12 +90,25 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		@Override
 		public void toBinary(Object o, ByteBuffer buf) {
-
+			Kryo kryo = new Kryo();
+			ByteBufferOutput output = new ByteBufferOutput(buf);
+			try {
+				kryo.register(LargeMessage.class);
+				kryo.register(BytesMessage.class);
+				kryo.writeClassAndObject(output, o);
+				output.flush();
+			} finally {
+				output.release();
+			}
 		}
 
 		@Override
 		public Object fromBinary(ByteBuffer buf, String manifest) throws NotSerializableException {
-			return null;
+			Kryo kryo = new Kryo();
+			ByteBufferInput input = new ByteBufferInput(buf);
+			kryo.register(LargeMessage.class);
+			kryo.register(BytesMessage.class);
+			return kryo.readObject(input, LargeMessage.class);
 		}
 	}
 
