@@ -6,6 +6,7 @@ import akka.actor.ActorSelection;
 import akka.actor.Props;
 import akka.io.DirectByteBufferPool;
 import akka.serialization.ByteBufferSerializer;
+import akka.serialization.Serialization;
 import akka.serialization.SerializerWithStringManifest;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.ByteBufferInput;
@@ -48,8 +49,8 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage<T> implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		private T bytes;
-		private ActorRef sender;
-		private ActorRef receiver;
+		private String senderIdentifier;
+		private String receiverIdentifier;
 	}
 
 	@NoArgsConstructor
@@ -158,11 +159,18 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
 
-		receiverProxy.tell(new BytesMessage<>(message.getMessage(), this.sender(), message.getReceiver()), this.self());
+		String senderActorIdentifier = Serialization.serializedActorPath(message.getReceiver());
+		String receiverActorIdentifier = Serialization.serializedActorPath(message.getReceiver());
+
+		receiverProxy.tell(new BytesMessage<>(message.getMessage(), senderActorIdentifier, receiverActorIdentifier), this.self());
 	}
 
 	private void handle(BytesMessage<?> message) {
 		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content.
-		message.getReceiver().tell(message.getBytes(), message.getSender());
+
+		ActorRef sender = this.context().system().provider().resolveActorRef(message.getSenderIdentifier());
+		ActorRef receiver = this.context().system().provider().resolveActorRef(message.getReceiverIdentifier());
+
+		receiver.tell(message.getBytes(), sender);
 	}
 }
