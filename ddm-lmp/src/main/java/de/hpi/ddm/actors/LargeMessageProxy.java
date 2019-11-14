@@ -69,7 +69,10 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		@Override
 		public byte[] toBinary(Object o) {
-			ByteBuffer buf = pool.acquire();
+			//ByteBuffer buf = pool.acquire();
+			final ByteBuffer buf = ByteBuffer.allocate(1024);
+			System.out.println(o);
+
 			try {
 				toBinary(o, buf);
 				// flip() makes a buffer ready for a new sequence of channel-write or relative get operations:
@@ -89,19 +92,19 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 			return fromBinary(ByteBuffer.wrap(bytes), manifest);
 		}
 
-
 		@Override
 		public void toBinary(Object o, ByteBuffer buf) {
 			ByteBufferOutput output = new ByteBufferOutput(buf, 1024);
 			SerDeState kryo = KryoPoolSingleton.get().borrow();
+
 			try {
 				kryo.writeOutputTo(output);
-				kryo.writeObject(o);
+				kryo.writeClassAndObject(o);
 				output.flush();
-               // output.release();
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
+				output.release();
 				KryoPoolSingleton.get().release(kryo);
 			}
 		}
@@ -109,10 +112,11 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		@Override
 		public Object fromBinary(ByteBuffer buf, String manifest) throws NotSerializableException {
 			SerDeState kryo = KryoPoolSingleton.get().borrow();
+
 			try {
 				ByteBufferInput input = new ByteBufferInput(buf);
 				kryo.setInput(input);
-				return kryo.readObject(BytesMessage.class);
+				return kryo.readClassAndObject();
 			} finally {
 				KryoPoolSingleton.get().release(kryo);
 			}
