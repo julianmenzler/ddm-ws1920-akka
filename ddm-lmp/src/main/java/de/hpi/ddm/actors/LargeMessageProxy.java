@@ -55,6 +55,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 	@NoArgsConstructor
 	public static class LargeMessageByteBufSerializer extends SerializerWithStringManifest implements ByteBufferSerializer {
+		// https://doc.akka.io/docs/akka/2.4/scala/remoting-artery.html#ByteBuffer_based_serialization
 
 		DirectByteBufferPool pool = new akka.io.DirectByteBufferPool( 1024 * 1024, 10);
 
