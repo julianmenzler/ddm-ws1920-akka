@@ -98,11 +98,11 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 				kryo.writeOutputTo(output);
 				kryo.writeObject(o);
 				output.flush();
-			} catch (IOException e) {
-				e.printStackTrace();
-			} finally {
+               // output.release();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
 				KryoPoolSingleton.get().release(kryo);
-				output.release();
 			}
 		}
 
