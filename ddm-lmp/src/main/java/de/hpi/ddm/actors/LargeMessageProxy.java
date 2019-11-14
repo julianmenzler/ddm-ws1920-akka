@@ -72,7 +72,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		public byte[] toBinary(Object o) {
 			//ByteBuffer buf = pool.acquire();
 			final ByteBuffer buf = ByteBuffer.allocate(1024);
-			System.out.println(o);
 
 			try {
 				toBinary(o, buf);
@@ -95,18 +94,13 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		@Override
 		public void toBinary(Object o, ByteBuffer buf) {
-			ByteBufferOutput output = new ByteBufferOutput(buf, 1024);
-			SerDeState kryo = KryoPoolSingleton.get().borrow();
-
+			ByteBufferOutput output = new ByteBufferOutput(buf, 1024*1024);
+			Kryo kryo = new Kryo();
 			try {
-				kryo.writeOutputTo(output);
-				kryo.writeClassAndObject(o);
+				kryo.writeClassAndObject(output, o);
 				output.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
             } finally {
 				output.release();
-				KryoPoolSingleton.get().release(kryo);
 			}
 		}
 
@@ -149,9 +143,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		ActorRef receiver = message.getReceiver();
 		ActorSelection receiverProxy = this.context().actorSelection(receiver.path().child(DEFAULT_NAME));
 
-		// https://doc.akka.io/docs/akka/current/stream/stream-io.html#streaming-file-io
-		// SinkAktor
-
 		// This will definitely fail in a distributed setting if the serialized message is large!
 		// Solution options:
 		// 1. Serialize the object and send its bytes batch-wise (make sure to use artery's side channel then).
@@ -159,7 +150,9 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
 
-		String senderActorIdentifier = Serialization.serializedActorPath(this.sender());
+		// We need to use actor identifiers as string as they need to be serialized with Kryo. See:
+		// https://doc.akka.io/docs/akka/2.5.3/java/serialization.html#serializing-actorrefs
+        String senderActorIdentifier = Serialization.serializedActorPath(this.sender());
 		String receiverActorIdentifier = Serialization.serializedActorPath(message.getReceiver());
 
 		receiverProxy.tell(new BytesMessage<>(message.getMessage(), senderActorIdentifier, receiverActorIdentifier), this.self());
