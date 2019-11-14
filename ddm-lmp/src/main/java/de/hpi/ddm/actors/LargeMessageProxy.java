@@ -1,24 +1,25 @@
 package de.hpi.ddm.actors;
 
-import java.io.NotSerializableException;
-import java.io.Serializable;
-import java.nio.ByteBuffer;
-
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
 import akka.actor.Props;
 import akka.io.DirectByteBufferPool;
 import akka.serialization.ByteBufferSerializer;
-import akka.serialization.Serialization;
-import akka.serialization.SerializationExtension;
 import akka.serialization.SerializerWithStringManifest;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.ByteBufferInput;
 import com.esotericsoftware.kryo.io.ByteBufferOutput;
+import com.twitter.chill.SerDeState;
+import de.hpi.ddm.structures.KryoPoolSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.io.IOException;
+import java.io.NotSerializableException;
+import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 public class LargeMessageProxy extends AbstractLoggingActor {
 
@@ -68,7 +69,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		@Override
 		public byte[] toBinary(Object o) {
-			final ByteBuffer buf = pool.acquire();
+			ByteBuffer buf = pool.acquire();
 			try {
 				toBinary(o, buf);
 				// flip() makes a buffer ready for a new sequence of channel-write or relative get operations:
@@ -88,27 +89,33 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 			return fromBinary(ByteBuffer.wrap(bytes), manifest);
 		}
 
+
 		@Override
 		public void toBinary(Object o, ByteBuffer buf) {
-			Kryo kryo = new Kryo();
-			ByteBufferOutput output = new ByteBufferOutput(buf);
+			ByteBufferOutput output = new ByteBufferOutput(buf, 1024);
+			SerDeState kryo = KryoPoolSingleton.get().borrow();
 			try {
-				kryo.register(LargeMessage.class);
-				kryo.register(BytesMessage.class);
-				kryo.writeClassAndObject(output, o);
+				kryo.writeOutputTo(output);
+				kryo.writeObject(o);
 				output.flush();
+			} catch (IOException e) {
+				e.printStackTrace();
 			} finally {
+				KryoPoolSingleton.get().release(kryo);
 				output.release();
 			}
 		}
 
 		@Override
 		public Object fromBinary(ByteBuffer buf, String manifest) throws NotSerializableException {
-			Kryo kryo = new Kryo();
-			ByteBufferInput input = new ByteBufferInput(buf);
-			kryo.register(LargeMessage.class);
-			kryo.register(BytesMessage.class);
-			return kryo.readObject(input, LargeMessage.class);
+			SerDeState kryo = KryoPoolSingleton.get().borrow();
+			try {
+				ByteBufferInput input = new ByteBufferInput(buf);
+				kryo.setInput(input);
+				return kryo.readObject(BytesMessage.class);
+			} finally {
+				KryoPoolSingleton.get().release(kryo);
+			}
 		}
 	}
 
@@ -136,7 +143,10 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	private void handle(LargeMessage<?> message) {
 		ActorRef receiver = message.getReceiver();
 		ActorSelection receiverProxy = this.context().actorSelection(receiver.path().child(DEFAULT_NAME));
-		
+
+		// https://doc.akka.io/docs/akka/current/stream/stream-io.html#streaming-file-io
+		// SinkAktor
+
 		// This will definitely fail in a distributed setting if the serialized message is large!
 		// Solution options:
 		// 1. Serialize the object and send its bytes batch-wise (make sure to use artery's side channel then).
