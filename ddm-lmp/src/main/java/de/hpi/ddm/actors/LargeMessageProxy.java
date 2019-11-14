@@ -159,7 +159,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
 
-		String senderActorIdentifier = Serialization.serializedActorPath(message.getReceiver());
+		String senderActorIdentifier = Serialization.serializedActorPath(this.sender());
 		String receiverActorIdentifier = Serialization.serializedActorPath(message.getReceiver());
 
 		receiverProxy.tell(new BytesMessage<>(message.getMessage(), senderActorIdentifier, receiverActorIdentifier), this.self());
