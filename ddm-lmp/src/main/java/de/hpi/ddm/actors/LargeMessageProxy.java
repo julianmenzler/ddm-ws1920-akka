@@ -13,12 +13,14 @@ import akka.stream.SourceRef;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.StreamRefs;
+import de.hpi.ddm.structures.KryoPoolSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.apache.commons.lang3.ArrayUtils;
 
 import java.io.Serializable;
+import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
@@ -50,8 +52,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		private  SourceRef<Byte> bytes;
-		private  int serializerId;
-		private  String serializerManifest;
+		private  Class klass;
 		private  ActorRef sender;
 		private  ActorRef receiver;
 	}
@@ -85,26 +86,28 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		ActorSelection receiverProxy = this.context().actorSelection(message.receiver.path().child(DEFAULT_NAME));
 
 		// Serialization
-		int serializerId = serialization.findSerializerFor(message).identifier();
-		String manifest = Serializers.manifestFor(serialization.findSerializerFor(message), message);
 		Byte[] bytes = ArrayUtils.toObject(this.serialization.serialize(message.message).get());
 
-		// Configure data stream
+		// Configure data stream with serialized data
 		final Source<Byte, NotUsed> messageSource = Source.from(Arrays.asList(bytes));
 		final CompletionStage<SourceRef<Byte>> messageRefs = messageSource.runWith(StreamRefs.sourceRef(), this.mat);
-		messageRefs.thenApply(ref -> new BytesMessage(ref, serializerId, manifest, this.sender(), message.receiver) )
+
+		// Serialize and stream to other proxy actor
+        messageRefs.thenApply(ref -> new BytesMessage(ref, message.getClass(), this.sender(), message.receiver) )
 				.thenAccept(result -> receiverProxy.tell(result, this.self()));
 	}
 
 	private void handle(BytesMessage message) {
-		// Collect the bytes and collect them in a list to be serialized
+		// Collect the bytes with Sink.seq and move them into a list to be serialized
 		final SourceRef<Byte> sourceRef = message.bytes;
 		final Source<Byte, NotUsed> source = sourceRef.getSource();
 		final CompletionStage<List<Byte>> bytesCompletion = source.runWith(Sink.seq(), mat);
 
-		// Deserialize and route to receiver actor
-		bytesCompletion
-				.thenApply(bytes -> this.serialization.deserialize((byte[]) ArrayUtils.toPrimitive(bytes.toArray()), message.serializerId, message.serializerManifest).get())
-				.thenAccept((object) -> message.receiver.tell(object, message.sender));
+		// Deserialize and forward to receiver
+        bytesCompletion.thenAccept(result -> {
+            byte[] bytes = ArrayUtils.toPrimitive(result.toArray(new Byte[result.size()]));
+            Object object = this.serialization.deserialize(bytes, message.klass);
+            message.receiver.tell(object, message.sender);
+        });
 	}
 }
