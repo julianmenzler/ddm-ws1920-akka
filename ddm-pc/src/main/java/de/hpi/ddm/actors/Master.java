@@ -50,7 +50,7 @@ public class Master extends AbstractLoggingActor {
     }
 
     @Data
-    private static class RegistrationMessage implements Serializable {
+    public static class RegistrationMessage implements Serializable {
         private static final long serialVersionUID = 3303081601659723997L;
     }
 
@@ -76,7 +76,7 @@ public class Master extends AbstractLoggingActor {
     private final ActorRef reader;
     private final ActorRef collector;
     private final List<ActorRef> workers;
-    private Router workerRouter;
+    private final Router workerRouter = new Router(new SmallestMailboxRoutingLogic());
 
     private long startTime;
 
@@ -133,6 +133,7 @@ public class Master extends AbstractLoggingActor {
     protected void handle(RegistrationMessage message) {
         this.context().watch(this.sender());
         this.workers.add(this.sender());
+        workerRouter.addRoutee(this.sender());
         this.log().info("Registered {}", this.sender());
     }
 
@@ -144,9 +145,6 @@ public class Master extends AbstractLoggingActor {
 
     protected void handle(StartMessage message) {
         this.startTime = System.currentTimeMillis();
-
-        workerRouter = new Router(new SmallestMailboxRoutingLogic());
-        this.workers.forEach(workerRouter::addRoutee);
 
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
@@ -216,10 +214,10 @@ public class Master extends AbstractLoggingActor {
                 newHints.add(line[i]);
             }
             newHints.forEach((hintHash) -> hints.put(hintHash, null));
-            hashedHintsOfPasswords.put(line[3], newHints);
+            hashedHintsOfPasswords.put(line[4], newHints);
 
             // Save password hashes
-            passwords.put(line[3], null);
+            passwords.put(line[4], null);
         }
     }
 }

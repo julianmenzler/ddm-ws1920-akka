@@ -69,7 +69,6 @@ public class Worker extends AbstractLoggingActor {
 	private Member masterSystem;
 	private final Cluster cluster;
 
-
 	/////////////////////
 	// Actor Lifecycle //
 	/////////////////////
@@ -155,7 +154,7 @@ public class Worker extends AbstractLoggingActor {
 	}
 
 	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
-		if(k == 0) {
+		if (k == 0) {
 			if (cracker.checkHash(prefix)) {
 				// We found the password!
 				return prefix;
