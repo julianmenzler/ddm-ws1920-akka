@@ -40,15 +40,21 @@ public class Worker extends AbstractLoggingActor {
 	// Actor Messages //
 	////////////////////
 
+	@Data @SuppressWarnings("unused")
+	public static class WorkMessage implements Serializable {
+		private static final long serialVersionUID = -7643194361868862395L;
+		private WorkMessage() {}
+	}
+
 	@Data @AllArgsConstructor
-	public static class CreatePermutationsMessage implements Serializable {
+	public static class CreatePermutationsMessage extends WorkMessage implements Serializable {
 		private static final long serialVersionUID = 3303081691659723997L;
 		private HashMap<String, String> hints;
 		private String passwordAlphabet;
 	}
 
 	@Data @AllArgsConstructor
-	public static class CrackPasswordMessage implements Serializable {
+	public static class CrackPasswordMessage extends WorkMessage implements Serializable {
 		private static final long serialVersionUID = 3203081691659723997L;
 		private String passwordAlphabet;
 		private String passwordHash;
