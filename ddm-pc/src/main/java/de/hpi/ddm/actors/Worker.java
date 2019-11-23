@@ -127,9 +127,10 @@ public class Worker extends AbstractLoggingActor {
 
 		for (int i = 0; i < passwordAlphabet.length(); i++) {
 			String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
-			List<String> permutations = new ArrayList<>();
-			heapPermutation(hintAlphabet.toCharArray(), hintAlphabet.length(), permutations);
-			permutations.forEach((permutation) -> {
+
+			heapPermutation(hintAlphabet.toCharArray(), hintAlphabet.length(), (permutation) -> {
+				// Check if we can find the new and hashed permutation in our hints
+				// If yes, we want to save this permutation
 				String hashResult = this.hash(permutation);
 				if(hints.containsKey(hashResult)) {
 					hints.put(hashResult, permutation);
@@ -146,10 +147,10 @@ public class Worker extends AbstractLoggingActor {
 
 	private void handle(CrackPasswordMessage message) {
 		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
-		String password = crackPassword(passwordAlphabet, "", message.passwordLength, (potentialPassword) -> hash(potentialPassword).equals(message.passwordHash));
-		System.out.println("Found password: " + password);
+		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
+				(potentialPassword) -> hash(potentialPassword).equals(message.passwordHash));
+		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
 	}
-
 
 	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
 		if(k == 0) {
@@ -205,17 +206,21 @@ public class Worker extends AbstractLoggingActor {
 			throw new RuntimeException(e.getMessage());
 		}
 	}
-	
+
+	private interface PermutationCallback {
+		void call(String permutation);
+	}
+
 	// Generating all permutations of an array using Heap's Algorithm
 	// https://en.wikipedia.org/wiki/Heap's_algorithm
 	// https://www.geeksforgeeks.org/heaps-algorithm-for-generating-permutations/
-	private void heapPermutation(char[] a, int size, List<String> l) {
+	private void heapPermutation(char[] a, int size, PermutationCallback callback) {
 		// If size is 1, store the obtained permutation
 		if (size == 1)
-			l.add(new String(a));
+			callback.call(new String(a));
 
 		for (int i = 0; i < size; i++) {
-			heapPermutation(a, size - 1, l);
+			heapPermutation(a, size - 1, callback);
 
 			// If size is odd, swap first and last element
 			if (size % 2 == 1) {
