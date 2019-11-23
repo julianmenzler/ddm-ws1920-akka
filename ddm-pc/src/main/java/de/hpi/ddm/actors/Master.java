@@ -16,202 +16,210 @@ import lombok.NoArgsConstructor;
 
 public class Master extends AbstractLoggingActor {
 
-	////////////////////////
-	// Actor Construction //
-	////////////////////////
-	
-	public static final String DEFAULT_NAME = "master";
+    ////////////////////////
+    // Actor Construction //
+    ////////////////////////
 
-	public static Props props(final ActorRef reader, final ActorRef collector) {
-		return Props.create(Master.class, () -> new Master(reader, collector));
-	}
+    public static final String DEFAULT_NAME = "master";
 
-	public Master(final ActorRef reader, final ActorRef collector) {
-		this.reader = reader;
-		this.collector = collector;
-		this.workers = new ArrayList<>();
-	}
+    public static Props props(final ActorRef reader, final ActorRef collector) {
+        return Props.create(Master.class, () -> new Master(reader, collector));
+    }
 
-	////////////////////
-	// Actor Messages //
-	////////////////////
+    public Master(final ActorRef reader, final ActorRef collector) {
+        this.reader = reader;
+        this.collector = collector;
+        this.workers = new ArrayList<>();
+    }
 
-	@Data
-	public static class StartMessage implements Serializable {
-		private static final long serialVersionUID = -50374816448627600L;
-	}
-	
-	@Data @NoArgsConstructor @AllArgsConstructor
-	public static class BatchMessage implements Serializable {
-		private static final long serialVersionUID = 8343040942748609598L;
-		private List<String[]> lines;
-	}
+    ////////////////////
+    // Actor Messages //
+    ////////////////////
 
-	@Data
-	public static class RegistrationMessage implements Serializable {
-		private static final long serialVersionUID = 3303081601659723997L;
-	}
+    @Data
+    public static class StartMessage implements Serializable {
+        private static final long serialVersionUID = -50374816448627600L;
+    }
 
-	@Data @AllArgsConstructor
-	public static class NewHintsMessage implements Serializable {
-		private static final long serialVersionUID = 3303011691659723997L;
-		private HashMap<String, String> hints;
-	}
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BatchMessage implements Serializable {
+        private static final long serialVersionUID = 8343040942748609598L;
+        private List<String[]> lines;
+    }
 
-	@Data @AllArgsConstructor
-	public static class CollectPasswordMessage implements Serializable {
-		private static final long serialVersionUID = 3303011691659723997L;
-		private String passwordHash;
-		private String password;
-	}
+    @Data
+    private static class RegistrationMessage implements Serializable {
+        private static final long serialVersionUID = 3303081601659723997L;
+    }
 
-	/////////////////
-	// Actor State //
-	/////////////////
+    @Data
+    @AllArgsConstructor
+    public static class NewHintsMessage implements Serializable {
+        private static final long serialVersionUID = 3303011691659723997L;
+        private HashMap<String, String> hints;
+    }
 
-	private final ActorRef reader;
-	private final ActorRef collector;
-	private final List<ActorRef> workers;
-	private Router workerRouter;
+    @Data
+    @AllArgsConstructor
+    public static class CollectPasswordMessage implements Serializable {
+        private static final long serialVersionUID = 3303011691659723997L;
+        private String passwordHash;
+        private String password;
+    }
 
-	private long startTime;
+    /////////////////
+    // Actor State //
+    /////////////////
 
-	private List<String[]> lines = new ArrayList<>(); // from CSV
-	private HashMap<String, String> hints = new HashMap<>();
-	private Integer hintsFound = 0;
-	private HashMap<String, String> passwords = new HashMap<>();
-	private String passwordAlphabet = "";
+    private final ActorRef reader;
+    private final ActorRef collector;
+    private final List<ActorRef> workers;
+    private Router workerRouter;
 
-	/////////////////////
-	// Actor Lifecycle //
-	/////////////////////
+    private long startTime;
 
-	@Override
-	public void preStart() {
-		Reaper.watchWithDefaultReaper(this);
-	}
+    private HashMap<String, String> hints = new HashMap<>();
+    private Integer hintsFound = 0;
+    private HashMap<String, String> passwords = new HashMap<>(); // Map Password hash -> Password
+    private HashMap<String, Set<String>> hashedHintsOfPasswords = new HashMap<>();
+    private Integer passwordsFound = 0;
+    private Integer passwordLength = 0;
+    private String passwordAlphabet = "";
 
-	////////////////////
-	// Actor Behavior //
-	////////////////////
+    /////////////////////
+    // Actor Lifecycle //
+    /////////////////////
 
-	@Override
-	public Receive createReceive() {
-		return receiveBuilder()
-				.match(StartMessage.class, this::handle)
-				.match(BatchMessage.class, this::handle)
-				.match(Terminated.class, this::handle)
-				.match(NewHintsMessage.class, this::handle)
-				.match(CollectPasswordMessage.class, this::handle)
-				.match(RegistrationMessage.class, this::handle)
-				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
-				.build();
-	}
+    @Override
+    public void preStart() {
+        Reaper.watchWithDefaultReaper(this);
+    }
+
+    ////////////////////
+    // Actor Behavior //
+    ////////////////////
+
+    @Override
+    public Receive createReceive() {
+        return receiveBuilder()
+                .match(StartMessage.class, this::handle)
+                .match(BatchMessage.class, this::handle)
+                .match(Terminated.class, this::handle)
+                .match(NewHintsMessage.class, this::handle)
+                .match(CollectPasswordMessage.class, this::handle)
+                .match(RegistrationMessage.class, this::handle)
+                .matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
+                .build();
+    }
 
 
-	protected void terminate() {
-		this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
-		this.collector.tell(PoisonPill.getInstance(), ActorRef.noSender());
-		
-		for (ActorRef worker : this.workers) {
-			this.context().unwatch(worker);
-			worker.tell(PoisonPill.getInstance(), ActorRef.noSender());
-		}
-		
-		this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
-		
-		long executionTime = System.currentTimeMillis() - this.startTime;
-		this.log().info("Algorithm finished in {} ms", executionTime);
-	}
+    protected void terminate() {
+        this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
+        this.collector.tell(PoisonPill.getInstance(), ActorRef.noSender());
 
-	protected void handle(RegistrationMessage message) {
-		this.context().watch(this.sender());
-		this.workers.add(this.sender());
-		this.log().info("Registered {}", this.sender());
-	}
-	
-	protected void handle(Terminated message) {
-		this.context().unwatch(message.getActor());
-		this.workers.remove(message.getActor());
-		this.log().info("Unregistered {}", message.getActor());
-	}
+        for (ActorRef worker : this.workers) {
+            this.context().unwatch(worker);
+            worker.tell(PoisonPill.getInstance(), ActorRef.noSender());
+        }
 
-	protected void handle(StartMessage message) {
-		this.startTime = System.currentTimeMillis();
+        this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 
-		workerRouter = new Router(new SmallestMailboxRoutingLogic());
-		this.workers.forEach(workerRouter::addRoutee);
+        long executionTime = System.currentTimeMillis() - this.startTime;
+        this.log().info("Algorithm finished in {} ms", executionTime);
+    }
 
-		this.reader.tell(new Reader.ReadMessage(), this.self());
-	}
+    protected void handle(RegistrationMessage message) {
+        this.context().watch(this.sender());
+        this.workers.add(this.sender());
+        this.log().info("Registered {}", this.sender());
+    }
 
-	protected void handle(BatchMessage message) {
-		if (message.getLines().isEmpty()) {
-			// We want to start the work as soon as we got all lines
-			generatePermutations();
-			return;
-		}
+    protected void handle(Terminated message) {
+        this.context().unwatch(message.getActor());
+        this.workers.remove(message.getActor());
+        this.log().info("Unregistered {}", message.getActor());
+    }
 
-		List<String[]> newLines = message.getLines();
-		lines.addAll(newLines);
-		hints.putAll(getHintHashFromLines(newLines));
+    protected void handle(StartMessage message) {
+        this.startTime = System.currentTimeMillis();
 
-		this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
+        workerRouter = new Router(new SmallestMailboxRoutingLogic());
+        this.workers.forEach(workerRouter::addRoutee);
 
-		// Request new batch
-		this.reader.tell(new Reader.ReadMessage(), this.self());
-	}
+        this.reader.tell(new Reader.ReadMessage(), this.self());
+    }
 
-	private void handle(NewHintsMessage message) {
-		hints.putAll(message.hints);
-		hintsFound += message.hints.size();
+    protected void handle(BatchMessage message) {
+        if (message.getLines().isEmpty()) {
+            // We want to start the work as soon as we got all lines
+            // Generate permutations by leaving one char out and then distributing to workers
+            for (int i = 0; i < passwordAlphabet.length(); i++) {
+                String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
+                workerRouter.route(new Worker.CrackHintsMessage(hints.keySet(), hintAlphabet), this.self());
+            }
+            return;
+        }
 
-		// We want to start password cracking when all hints are found
-		if (hintsFound == lines.size()) {
-			startPasswordCracking();
-		}
-	}
+        getInfoFromLines(message.getLines());
 
-	private void handle(CollectPasswordMessage message) {
-		this.collector.tell(new Collector.CollectMessage("Found password: " + message.password), this.self());
-		passwords.put(message.passwordHash, message.password);
+        this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
 
-		// All password were found
-		if(passwords.size() == lines.size()) {
-			this.collector.tell(new Collector.PrintMessage(), this.self());
-			this.terminate();
-		}
-	}
+        // Request new batch
+        this.reader.tell(new Reader.ReadMessage(), this.self());
+    }
 
-	private HashMap<String, String> getHintHashFromLines(List<String[]> lines) {
-		HashMap<String, String> hints = new HashMap<>();
-		for (String[] line : lines) {
-			lines.add(line);
-			passwordAlphabet = line[2];
-			for (int i = 5; i < line.length; i++) {
-				hints.put(line[i], null);
-			}
-		}
+    private void handle(NewHintsMessage message) {
+        hints.putAll(message.hints); // Replaces null values for each given key in message.hints
+        hintsFound += message.hints.size();
 
-		return hints;
-	}
+        // We want to start password cracking when all hints are found
+        if (hintsFound != hints.size()) {
+            return;
+        }
 
-	private void generatePermutations() {
-		for (int i = 0; i < passwordAlphabet.length(); i++) {
-			String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
-			workerRouter.route(new Worker.CrackHintsMessage(hints.keySet(), hintAlphabet), this.self());
-		}
-	}
+        // Start password cracking
+        passwords.keySet().forEach((passwordHash) -> {
+            // Map password hash to the hints we found previously
+            Set<String> clearTextHints = new HashSet<>();
+            for (String hashedHint : hashedHintsOfPasswords.get(passwordHash)) {
+                clearTextHints.add(hints.get(hashedHint));
+            }
 
-	private void startPasswordCracking() {
-		lines.forEach((line) -> {
-			List<String> clearTextHints = new ArrayList<>();
-			for (int i = 5; i < line.length; i++) {
-				String hint = hints.get(line[i]);
-				clearTextHints.add(hint);
-			}
-			String passwordHash = line[4];
-			workerRouter.route(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, Integer.valueOf(line[3]), clearTextHints), this.self());
-		});
-	}
+            // Start cracking the password using hints
+            workerRouter.route(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, passwordLength, clearTextHints), this.self());
+        });
+    }
+
+    private void handle(CollectPasswordMessage message) {
+        this.collector.tell(new Collector.CollectMessage("Found password: " + message.password), this.self());
+        passwords.put(message.passwordHash, message.password);
+        passwordsFound += 1;
+
+        // All password were found
+        if (passwords.size() == passwordsFound) {
+            this.collector.tell(new Collector.PrintMessage(), this.self());
+            this.terminate();
+        }
+    }
+
+    private void getInfoFromLines(List<String[]> lines) {
+        for (String[] line : lines) {
+            // Save alphabet
+            passwordAlphabet = line[2];
+            passwordLength = Integer.valueOf(line[3]);
+
+            // Save hints
+            Set<String> newHints = new HashSet<>();
+            for (int i = 5; i < line.length; i++) {
+                newHints.add(line[i]);
+            }
+            newHints.forEach((hintHash) -> hints.put(hintHash, null));
+            hashedHintsOfPasswords.put(line[3], newHints);
+
+            // Save password hashes
+            passwords.put(line[3], null);
+        }
+    }
 }

@@ -59,7 +59,7 @@ public class Worker extends AbstractLoggingActor {
 		private String passwordAlphabet;
 		private String passwordHash;
 		private Integer passwordLength;
-		private List<String> hints;
+		private Set<String> hints;
 	}
 
 	/////////////////
@@ -175,7 +175,7 @@ public class Worker extends AbstractLoggingActor {
 		return null;
 	}
 
-	private Set<Character> determinePasswordAlphabetFromHints(String passwordAlphabet, List<String> hints) {
+	private Set<Character> determinePasswordAlphabetFromHints(String passwordAlphabet, Set<String> hints) {
 		HashSet<Character> realPasswordAlphabet = new HashSet<>();
 		for(Character character : passwordAlphabet.toCharArray()) {
 			realPasswordAlphabet.add(character);
