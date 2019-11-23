@@ -1,8 +1,11 @@
 package de.hpi.ddm.actors;
 
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import akka.actor.AbstractLoggingActor;
@@ -16,6 +19,8 @@ import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.Member;
 import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 
 public class Worker extends AbstractLoggingActor {
 
@@ -36,6 +41,20 @@ public class Worker extends AbstractLoggingActor {
 	////////////////////
 	// Actor Messages //
 	////////////////////
+
+	@Data @AllArgsConstructor
+	public static class CreatePermutationsMessage implements Serializable {
+		private static final long serialVersionUID = 3303081691659723997L;
+		private HashMap<String, String> hints;
+		private String passwordAlphabet;
+	}
+
+	@Data @AllArgsConstructor
+	public static class HintSolvingMessage implements Serializable {
+		private static final long serialVersionUID = 3203081691659723997L;
+		private List<String> hints;
+		private String passwordAlphabet;
+	}
 
 	/////////////////
 	// Actor State //
@@ -70,6 +89,7 @@ public class Worker extends AbstractLoggingActor {
 				.match(CurrentClusterState.class, this::handle)
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
+				.match(CreatePermutationsMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
@@ -99,7 +119,30 @@ public class Worker extends AbstractLoggingActor {
 		if (this.masterSystem.equals(message.member()))
 			this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 	}
-	
+
+	private void handle(CreatePermutationsMessage message) {
+		String passwordAlphabet = message.passwordAlphabet;
+		HashMap<String, String> hints = message.hints;
+
+		for (int i = 0; i < passwordAlphabet.length(); i++) {
+			String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
+			List<String> permutations = new ArrayList<>();
+			heapPermutation(hintAlphabet.toCharArray(), hintAlphabet.length(), hintAlphabet.length(), permutations);
+			permutations.forEach((permutation) -> {
+				String hashResult = this.hash(permutation);
+				if(hints.containsKey(hashResult)) {
+					hints.put(hashResult, permutation);
+				}
+			});
+		}
+
+		this.sender().tell(new Master.FoundHintsMessage(hints), this.self());
+	}
+
+	private void handle(HintSolvingMessage message) {
+		System.out.println(message);
+	}
+
 	private String hash(String line) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
