@@ -47,10 +47,10 @@ public class Worker extends AbstractLoggingActor {
 	}
 
 	@Data @AllArgsConstructor
-	public static class CreatePermutationsMessage extends WorkMessage implements Serializable {
+	public static class CrackHintsMessage extends WorkMessage implements Serializable {
 		private static final long serialVersionUID = 3303081691659723997L;
-		private HashMap<String, String> hints;
-		private String passwordAlphabet;
+		private Set<String> hintHashes;
+		private String hintAlphabet;
 	}
 
 	@Data @AllArgsConstructor
@@ -68,7 +68,8 @@ public class Worker extends AbstractLoggingActor {
 
 	private Member masterSystem;
 	private final Cluster cluster;
-	
+
+
 	/////////////////////
 	// Actor Lifecycle //
 	/////////////////////
@@ -95,7 +96,7 @@ public class Worker extends AbstractLoggingActor {
 				.match(CurrentClusterState.class, this::handle)
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
-				.match(CreatePermutationsMessage.class, this::handle)
+				.match(CrackHintsMessage.class, this::handle)
 				.match(CrackPasswordMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
@@ -127,24 +128,19 @@ public class Worker extends AbstractLoggingActor {
 			this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 	}
 
-	private void handle(CreatePermutationsMessage message) {
-		String passwordAlphabet = message.passwordAlphabet;
-		HashMap<String, String> hints = message.hints;
+	private void handle(CrackHintsMessage message) {
+		HashMap<String, String> hints = new HashMap<>();
 
-		for (int i = 0; i < passwordAlphabet.length(); i++) {
-			String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
+		heapPermutation(message.hintAlphabet.toCharArray(), message.hintAlphabet.length(), (permutation) -> {
+			// Check if we can find the new and hashed permutation in our hints
+			// If yes, we want to save this permutation
+			String hashResult = this.hash(permutation);
+			if(message.hintHashes.contains(hashResult)) {
+				hints.put(hashResult, permutation);
+			}
+		});
 
-			heapPermutation(hintAlphabet.toCharArray(), hintAlphabet.length(), (permutation) -> {
-				// Check if we can find the new and hashed permutation in our hints
-				// If yes, we want to save this permutation
-				String hashResult = this.hash(permutation);
-				if(hints.containsKey(hashResult)) {
-					hints.put(hashResult, permutation);
-				}
-			});
-		}
-
-		this.sender().tell(new Master.FoundHintsMessage(hints), this.self());
+		this.sender().tell(new Master.NewHintsMessage(hints), this.self());
 	}
 
 	private interface Cracker {

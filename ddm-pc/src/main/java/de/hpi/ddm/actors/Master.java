@@ -8,6 +8,8 @@ import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
 import akka.actor.Terminated;
+import akka.routing.Router;
+import akka.routing.SmallestMailboxRoutingLogic;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -51,7 +53,7 @@ public class Master extends AbstractLoggingActor {
 	}
 
 	@Data @AllArgsConstructor
-	public static class FoundHintsMessage implements Serializable {
+	public static class NewHintsMessage implements Serializable {
 		private static final long serialVersionUID = 3303011691659723997L;
 		private HashMap<String, String> hints;
 	}
@@ -70,11 +72,13 @@ public class Master extends AbstractLoggingActor {
 	private final ActorRef reader;
 	private final ActorRef collector;
 	private final List<ActorRef> workers;
+	private Router workerRouter;
 
 	private long startTime;
 
 	private List<String[]> lines = new ArrayList<>(); // from CSV
 	private HashMap<String, String> hints = new HashMap<>();
+	private Integer hintsFound = 0;
 	private HashMap<String, String> passwords = new HashMap<>();
 	private String passwordAlphabet = "";
 
@@ -97,7 +101,7 @@ public class Master extends AbstractLoggingActor {
 				.match(StartMessage.class, this::handle)
 				.match(BatchMessage.class, this::handle)
 				.match(Terminated.class, this::handle)
-				.match(FoundHintsMessage.class, this::handle)
+				.match(NewHintsMessage.class, this::handle)
 				.match(CollectPasswordMessage.class, this::handle)
 				.match(RegistrationMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
@@ -135,17 +139,22 @@ public class Master extends AbstractLoggingActor {
 	protected void handle(StartMessage message) {
 		this.startTime = System.currentTimeMillis();
 
+		workerRouter = new Router(new SmallestMailboxRoutingLogic());
+		this.workers.forEach(workerRouter::addRoutee);
+
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 	}
 
 	protected void handle(BatchMessage message) {
 		if (message.getLines().isEmpty()) {
+			// We want to start the work as soon as we got all lines
+			generatePermutations();
 			return;
 		}
 
-		HashMap<String, String> hintHash = getHintHashFromLines(message.getLines());
-
-		this.workers.get(0).tell(new Worker.CreatePermutationsMessage(hintHash, passwordAlphabet), this.self());
+		List<String[]> newLines = message.getLines();
+		lines.addAll(newLines);
+		hints.putAll(getHintHashFromLines(newLines));
 
 		this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
 
@@ -153,18 +162,14 @@ public class Master extends AbstractLoggingActor {
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 	}
 
-	private void handle(FoundHintsMessage message) {
-		ActorRef worker = workers.get(0);
+	private void handle(NewHintsMessage message) {
+		hints.putAll(message.hints);
+		hintsFound += message.hints.size();
 
-		lines.forEach((line) -> {
-			List<String> clearTextHints = new ArrayList<>();
-			for (int i = 5; i < line.length; i++) {
-				String hint = message.hints.get(line[i]);
-				clearTextHints.add(hint);
-			}
-			String passwordHash = line[4];
-			worker.tell(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, Integer.valueOf(line[3]), clearTextHints), this.self());
-		});
+		// We want to start password cracking when all hints are found
+		if (hintsFound == lines.size()) {
+			startPasswordCracking();
+		}
 	}
 
 	private void handle(CollectPasswordMessage message) {
@@ -189,5 +194,24 @@ public class Master extends AbstractLoggingActor {
 		}
 
 		return hints;
+	}
+
+	private void generatePermutations() {
+		for (int i = 0; i < passwordAlphabet.length(); i++) {
+			String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
+			workerRouter.route(new Worker.CrackHintsMessage(hints.keySet(), hintAlphabet), this.self());
+		}
+	}
+
+	private void startPasswordCracking() {
+		lines.forEach((line) -> {
+			List<String> clearTextHints = new ArrayList<>();
+			for (int i = 5; i < line.length; i++) {
+				String hint = hints.get(line[i]);
+				clearTextHints.add(hint);
+			}
+			String passwordHash = line[4];
+			workerRouter.route(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, Integer.valueOf(line[3]), clearTextHints), this.self());
+		});
 	}
 }
