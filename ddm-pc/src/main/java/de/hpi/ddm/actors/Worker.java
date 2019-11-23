@@ -52,6 +52,7 @@ public class Worker extends AbstractLoggingActor {
 		private static final long serialVersionUID = 3203081691659723997L;
 		private String passwordAlphabet;
 		private String passwordHash;
+		private Integer passwordLength;
 		private List<String> hints;
 	}
 
@@ -139,17 +140,40 @@ public class Worker extends AbstractLoggingActor {
 		this.sender().tell(new Master.FoundHintsMessage(hints), this.self());
 	}
 
+	private interface Cracker {
+		boolean checkHash(String password);
+	}
+
 	private void handle(CrackPasswordMessage message) {
+		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
+		String password = crackPassword(passwordAlphabet, "", message.passwordLength, (potentialPassword) -> hash(potentialPassword).equals(message.passwordHash));
+		System.out.println("Found password: " + password);
+	}
 
-		Set<Character> realPasswordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
 
+	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
+		if(k == 0) {
+			if (cracker.checkHash(prefix)) {
+				// We found the password!
+				return prefix;
+			} else {
+				return null;
+			}
+		}
 
+		for (Character character : alphabet) {
+			String newPrefix = prefix + character;
+			String password = crackPassword(alphabet, newPrefix, k - 1, cracker);
+			if (password != null) {
+				return password;
+			}
+		}
 
+		return null;
 	}
 
 	private Set<Character> determinePasswordAlphabetFromHints(String passwordAlphabet, List<String> hints) {
-
-		HashSet<Character> realPasswordAlphabet = new HashSet<Character>();
+		HashSet<Character> realPasswordAlphabet = new HashSet<>();
 		for(Character character : passwordAlphabet.toCharArray()) {
 			realPasswordAlphabet.add(character);
 		}

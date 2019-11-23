@@ -187,7 +187,7 @@ public class Master extends AbstractLoggingActor {
 				clearTextHints.add(hint);
 			}
 			String passwordHash = line[4];
-			worker.tell(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, clearTextHints), this.self());
+			worker.tell(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, Integer.valueOf(line[3]), clearTextHints), this.self());
 		});
 	}
 }
