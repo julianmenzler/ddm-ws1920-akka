@@ -80,10 +80,10 @@ public class Master extends AbstractLoggingActor {
 
     private long startTime;
 
-    private HashMap<String, String> hints = new HashMap<>();
+    private HashMap<String, String> hintHashToHint = new HashMap<>(); // Map hint hash -> hint (clear-text)
+    private HashMap<String, String> passwordHashToPassword = new HashMap<>(); // Map Password hash -> Password
+    private HashMap<String, Set<String>> passwordHashToHintHashes = new HashMap<>(); // Map Password hash -> Hint hashes
     private Integer hintsFound = 0;
-    private HashMap<String, String> passwords = new HashMap<>(); // Map Password hash -> Password
-    private HashMap<String, Set<String>> hashedHintsOfPasswords = new HashMap<>();
     private Integer passwordsFound = 0;
     private Integer passwordLength = 0;
     private String passwordAlphabet = "";
@@ -155,7 +155,7 @@ public class Master extends AbstractLoggingActor {
             // Generate permutations by leaving one char out and then distributing to workers
             for (int i = 0; i < passwordAlphabet.length(); i++) {
                 String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
-                workerRouter.route(new Worker.CrackHintsMessage(hints.keySet(), hintAlphabet), this.self());
+                workerRouter.route(new Worker.CrackHintsMessage(hintHashToHint.keySet(), hintAlphabet), this.self());
             }
             return;
         }
@@ -169,20 +169,20 @@ public class Master extends AbstractLoggingActor {
     }
 
     private void handle(NewHintsMessage message) {
-        hints.putAll(message.hints); // Replaces null values for each given key in message.hints
+        hintHashToHint.putAll(message.hints); // Replaces null values for each given key in message.hints
         hintsFound += message.hints.size();
 
         // We want to start password cracking when all hints are found
-        if (hintsFound != hints.size()) {
+        if (hintsFound != hintHashToHint.size()) {
             return;
         }
 
         // Start password cracking
-        passwords.keySet().forEach((passwordHash) -> {
+        passwordHashToPassword.keySet().forEach((passwordHash) -> {
             // Map password hash to the hints we found previously
             Set<String> clearTextHints = new HashSet<>();
-            for (String hashedHint : hashedHintsOfPasswords.get(passwordHash)) {
-                clearTextHints.add(hints.get(hashedHint));
+            for (String hashedHint : passwordHashToHintHashes.get(passwordHash)) {
+                clearTextHints.add(hintHashToHint.get(hashedHint));
             }
 
             // Start cracking the password using hints
@@ -192,32 +192,35 @@ public class Master extends AbstractLoggingActor {
 
     private void handle(CollectPasswordMessage message) {
         this.collector.tell(new Collector.CollectMessage("Found password: " + message.password), this.self());
-        passwords.put(message.passwordHash, message.password);
+        passwordHashToPassword.put(message.passwordHash, message.password);
         passwordsFound += 1;
 
         // All password were found
-        if (passwords.size() == passwordsFound) {
+        if (passwordHashToPassword.size() == passwordsFound) {
             this.collector.tell(new Collector.PrintMessage(), this.self());
             this.terminate();
         }
     }
 
     private void getInfoFromLines(List<String[]> lines) {
-        for (String[] line : lines) {
-            // Save alphabet
+		String passwordHash;
+
+    	for (String[] line : lines) {
+            // Store alphabet
             passwordAlphabet = line[2];
             passwordLength = Integer.valueOf(line[3]);
+            passwordHash = line[4];
 
-            // Save hints
-            Set<String> newHints = new HashSet<>();
+            // Store hint hashes
+            Set<String> hintHashes = new HashSet<>();
             for (int i = 5; i < line.length; i++) {
-                newHints.add(line[i]);
+                hintHashes.add(line[i]);
             }
-            newHints.forEach((hintHash) -> hints.put(hintHash, null));
-            hashedHintsOfPasswords.put(line[4], newHints);
+            hintHashes.forEach((hintHash) -> hintHashToHint.put(hintHash, null));
+            passwordHashToHintHashes.put(passwordHash, hintHashes);
 
-            // Save password hashes
-            passwords.put(line[4], null);
+            // Store password hashes
+            passwordHashToPassword.put(passwordHash, null);
         }
     }
 }
