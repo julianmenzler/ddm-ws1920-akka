@@ -137,7 +137,8 @@ public class Master extends AbstractLoggingActor {
                 String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
 
                 // Start cracking hints - for each hint alphabet
-                dispatcher.tell(new Worker.CrackHintsMessage(hintHashToHint.keySet(), hintAlphabet), this.self());
+
+                dispatcher.tell(new Worker.CrackHintsMessage(new HashSet<>(hintHashToHint.keySet()), hintAlphabet), this.self());
             }
             return;
         }
