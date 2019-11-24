@@ -1,9 +1,6 @@
 package de.hpi.ddm.actors;
 
-import akka.actor.AbstractLoggingActor;
-import akka.actor.ActorRef;
-import akka.actor.PoisonPill;
-import akka.actor.Props;
+import akka.actor.*;
 import akka.cluster.Cluster;
 import akka.cluster.ClusterEvent.CurrentClusterState;
 import akka.cluster.ClusterEvent.MemberRemoved;
@@ -14,12 +11,19 @@ import de.hpi.ddm.MasterSystem;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.FiniteDuration;
 
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class Worker extends AbstractLoggingActor {
 
@@ -68,6 +72,7 @@ public class Worker extends AbstractLoggingActor {
 	// Actor State //
 	/////////////////
 
+	private ActorRef dispatcher;
 	private Member masterSystem;
 	private final Cluster cluster;
 
@@ -117,17 +122,23 @@ public class Worker extends AbstractLoggingActor {
 	private void register(Member member) {
 		if ((this.masterSystem == null) && member.hasRole(MasterSystem.MASTER_ROLE)) {
 			this.masterSystem = member;
-			
-			this.getContext()
-				.actorSelection(member.address() + "/user/" + Master.DEFAULT_NAME)
-				.tell(new Master.WorkerRegistrationMessage(), this.self());
+
+			Optional<ActorRef> ref = findActor(member.address() + "/user/" + Dispatcher.DEFAULT_NAME);
+			if(ref.isPresent()) {
+				dispatcher = ref.get();
+				dispatcher.tell(new Dispatcher.WorkerRegistrationMessage(), this.self());
+			} else {
+				this.log().error("Worker could not find Dispatcher-ActorRef");
+			}
 		}
 	}
-	
+
 	private void handle(MemberRemoved message) {
 		if (this.masterSystem.equals(message.member()))
 			this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 	}
+
+	// Handle work messages
 
 	private void handle(CrackHintsMessage message) {
 		HashMap<String, String> hints = new HashMap<>();
@@ -142,13 +153,16 @@ public class Worker extends AbstractLoggingActor {
 		});
 
 		this.sender().tell(new Master.NewHintsMessage(hints), this.self());
+		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(), this.self());
 	}
 
 	private void handle(CrackPasswordMessage message) {
 		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
 		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
 				(potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
+
 		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
+		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(), this.self());
 	}
 
 	////////////////////
@@ -244,4 +258,18 @@ public class Worker extends AbstractLoggingActor {
 			}
 		}
 	}
+
+	public synchronized Optional<ActorRef> findActor(final String path) {
+		FiniteDuration timeout = FiniteDuration.apply(30, TimeUnit.SECONDS);
+		final ActorSelection sel = this.context().actorSelection(path);
+
+		try {
+			final Future<ActorRef> fut = sel.resolveOne(timeout);
+			final ActorRef ref = Await.result(fut, timeout);
+			return Optional.of(ref);
+		} catch (final Exception e) {
+			return Optional.empty();
+		}
+	}
+
 }

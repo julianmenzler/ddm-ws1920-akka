@@ -1,23 +1,18 @@
 package de.hpi.ddm;
 
-import java.util.Scanner;
-import java.util.concurrent.TimeUnit;
-
-import com.typesafe.config.Config;
-import com.typesafe.config.ConfigFactory;
-
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.cluster.Cluster;
-import de.hpi.ddm.actors.Collector;
-import de.hpi.ddm.actors.Master;
-import de.hpi.ddm.actors.Reader;
-import de.hpi.ddm.actors.Reaper;
-import de.hpi.ddm.actors.Worker;
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigFactory;
+import de.hpi.ddm.actors.*;
 import de.hpi.ddm.configuration.Configuration;
 import de.hpi.ddm.configuration.ConfigurationSingleton;
 import scala.concurrent.Await;
 import scala.concurrent.duration.Duration;
+
+import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
 
 public class MasterSystem {
 	
@@ -43,15 +38,18 @@ public class MasterSystem {
 		ActorRef reader = system.actorOf(Reader.props(), Reader.DEFAULT_NAME);
 		
 		ActorRef collector = system.actorOf(Collector.props(), Collector.DEFAULT_NAME);
-		
-		ActorRef master = system.actorOf(Master.props(reader, collector), Master.DEFAULT_NAME);
-		
+
+		ActorRef dispatcher = system.actorOf(Dispatcher.props(), Dispatcher.DEFAULT_NAME);
+
+		ActorRef master = system.actorOf(Master.props(reader, dispatcher, collector), Master.DEFAULT_NAME);
+
 		Cluster.get(system).registerOnMemberUp(new Runnable() {
 			@Override
 			public void run() {
+
 				for (int i = 0; i < cfg.getNumWorkers(); i++)
 					system.actorOf(Worker.props(), Worker.DEFAULT_NAME + i);
-				
+
 				if (!cfg.isStartPaused())
 					system.actorSelection("/user/" + Master.DEFAULT_NAME).tell(new Master.StartMessage(), ActorRef.noSender());
 			}
