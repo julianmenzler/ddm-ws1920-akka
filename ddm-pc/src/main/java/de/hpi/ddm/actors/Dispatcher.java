@@ -34,7 +34,6 @@ public class Dispatcher extends AbstractLoggingActor {
         private static final long serialVersionUID = -8330958742629206627L;
     }
 
-    @Data @AllArgsConstructor
     @Data @AllArgsConstructor @SuppressWarnings("unused")
     public static class WorkCompletedMessage implements Serializable {
         private static final long serialVersionUID = -6823011111281387872L;
@@ -151,10 +150,8 @@ public class Dispatcher extends AbstractLoggingActor {
         }
 
         // stop busy workers
-        Iterator<ActorRef> it = this.busyWorkers.keySet().iterator();
-        while (it.hasNext())
-        {
-            worker = it.next();
+        for (ActorRef actorRef : this.busyWorkers.keySet()) {
+            worker = actorRef;
             worker.tell(PoisonPill.getInstance(), this.self());
         }
 
