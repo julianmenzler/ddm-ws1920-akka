@@ -159,11 +159,14 @@ public class Worker extends AbstractLoggingActor {
 
 	private void handle(CrackPasswordMessage message) {
 		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
-		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
-				(potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
+		Optional<String> password = crackPassword(passwordAlphabet, message.passwordLength, (potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
 
-		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
-		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
+		password.ifPresent((p) -> {
+			this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, p), this.self());
+			this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
+		});
+
+		password.orElseThrow(NullPointerException::new);
 	}
 
 	////////////////////
@@ -196,20 +199,24 @@ public class Worker extends AbstractLoggingActor {
 		return realPasswordAlphabet;
 	}
 
-	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
+	private Optional<String> crackPassword(Set<Character> alphabet, int k, Cracker cracker) {
+		return crackPasswordRecursion(alphabet, "", k, cracker);
+	}
+
+	private Optional<String> crackPasswordRecursion(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
 		if (k == 0) {
 			if (cracker.checkHash(prefix)) {
 				// We found the password!
-				return prefix;
+				return Optional.of(prefix);
 			} else {
-				return null;
+				return Optional.empty();
 			}
 		}
 
 		for (Character character : alphabet) {
 			String newPrefix = prefix + character;
-			String password = crackPassword(alphabet, newPrefix, k - 1, cracker);
-			if (password != null) {
+			Optional<String> password = crackPasswordRecursion(alphabet, newPrefix, k - 1, cracker);
+			if (!password.isPresent()) {
 				return password;
 			}
 		}
