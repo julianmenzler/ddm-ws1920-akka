@@ -50,7 +50,7 @@ public class Master extends AbstractLoggingActor {
     }
 
     @Data
-    public static class RegistrationMessage implements Serializable {
+    public static class WorkerRegistrationMessage implements Serializable {
         private static final long serialVersionUID = 3303081601659723997L;
     }
 
@@ -109,11 +109,10 @@ public class Master extends AbstractLoggingActor {
                 .match(Terminated.class, this::handle)
                 .match(NewHintsMessage.class, this::handle)
                 .match(CollectPasswordMessage.class, this::handle)
-                .match(RegistrationMessage.class, this::handle)
+                .match(WorkerRegistrationMessage.class, this::handle)
                 .matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
                 .build();
     }
-
 
     protected void terminate() {
         this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
@@ -130,7 +129,9 @@ public class Master extends AbstractLoggingActor {
         this.log().info("Algorithm finished in {} ms", executionTime);
     }
 
-    protected void handle(RegistrationMessage message) {
+    // Handling workers
+
+    protected void handle(WorkerRegistrationMessage message) {
         this.context().watch(this.sender());
         this.workers.add(this.sender());
         workerRouter.addRoutee(this.sender());
@@ -143,6 +144,9 @@ public class Master extends AbstractLoggingActor {
         this.log().info("Unregistered {}", message.getActor());
     }
 
+
+    // Logic – Reader
+
     protected void handle(StartMessage message) {
         this.startTime = System.currentTimeMillis();
 
@@ -151,22 +155,29 @@ public class Master extends AbstractLoggingActor {
 
     protected void handle(BatchMessage message) {
         if (message.getLines().isEmpty()) {
+
             // We want to start the work as soon as we got all lines
-            // Generate permutations by leaving one char out and then distributing to workers
+            assert(!passwordAlphabet.equals(""));
+            // Create HintAlphabets by removing a single char from the passwordAlphabet
             for (int i = 0; i < passwordAlphabet.length(); i++) {
+                // Multiple hint alphabets because each char can be removed
                 String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
+
+                // Start cracking hints - for each hint alphabet
                 workerRouter.route(new Worker.CrackHintsMessage(hintHashToHint.keySet(), hintAlphabet), this.self());
             }
             return;
         }
 
-        getInfoFromLines(message.getLines());
+        storeLinesInfo(message.getLines());
 
         this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
 
         // Request new batch
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
+
+    // Logic - Worker Results
 
     private void handle(NewHintsMessage message) {
         hintHashToHint.putAll(message.hints); // Replaces null values for each given key in message.hints
@@ -202,7 +213,13 @@ public class Master extends AbstractLoggingActor {
         }
     }
 
-    private void getInfoFromLines(List<String[]> lines) {
+
+    ////////////////////
+    // Helper funcs   //
+    ////////////////////
+
+
+    private void storeLinesInfo(List<String[]> lines) {
 		String passwordHash;
 
     	for (String[] line : lines) {

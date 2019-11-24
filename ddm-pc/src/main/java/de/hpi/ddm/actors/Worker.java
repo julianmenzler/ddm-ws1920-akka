@@ -62,6 +62,7 @@ public class Worker extends AbstractLoggingActor {
 		private Set<String> hints;
 	}
 
+
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -118,7 +119,7 @@ public class Worker extends AbstractLoggingActor {
 			
 			this.getContext()
 				.actorSelection(member.address() + "/user/" + Master.DEFAULT_NAME)
-				.tell(new Master.RegistrationMessage(), this.self());
+				.tell(new Master.WorkerRegistrationMessage(), this.self());
 		}
 	}
 	
@@ -133,7 +134,7 @@ public class Worker extends AbstractLoggingActor {
 		heapPermutation(message.hintAlphabet.toCharArray(), message.hintAlphabet.length(), (permutation) -> {
 			// Check if we can find the new and hashed permutation in our hints
 			// If yes, we want to save this permutation
-			String hashResult = this.hash(permutation);
+			String hashResult = this.getHash(permutation);
 			if(message.hintHashes.contains(hashResult)) {
 				hints.put(hashResult, permutation);
 			}
@@ -142,15 +143,41 @@ public class Worker extends AbstractLoggingActor {
 		this.sender().tell(new Master.NewHintsMessage(hints), this.self());
 	}
 
+	private void handle(CrackPasswordMessage message) {
+		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
+		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
+				(potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
+		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
+	}
+
+	////////////////////
+	// Helper stuff   //
+	////////////////////
+
 	private interface Cracker {
 		boolean checkHash(String password);
 	}
 
-	private void handle(CrackPasswordMessage message) {
-		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
-		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
-				(potentialPassword) -> hash(potentialPassword).equals(message.passwordHash));
-		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
+	private interface PermutationCallback {
+		void call(String permutation);
+	}
+
+	private Set<Character> determinePasswordAlphabetFromHints(String passwordAlphabet, Set<String> hints) {
+		HashSet<Character> realPasswordAlphabet = new HashSet<>();
+		for(Character character : passwordAlphabet.toCharArray()) {
+			realPasswordAlphabet.add(character);
+		}
+
+		for(String hint : hints) {
+			for(Character character : passwordAlphabet.toCharArray()) {
+				if(!hint.contains(character.toString())) {
+					realPasswordAlphabet.remove(character);
+					break;
+				}
+			}
+		}
+
+		return realPasswordAlphabet;
 	}
 
 	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
@@ -174,25 +201,7 @@ public class Worker extends AbstractLoggingActor {
 		return null;
 	}
 
-	private Set<Character> determinePasswordAlphabetFromHints(String passwordAlphabet, Set<String> hints) {
-		HashSet<Character> realPasswordAlphabet = new HashSet<>();
-		for(Character character : passwordAlphabet.toCharArray()) {
-			realPasswordAlphabet.add(character);
-		}
-
-		for(String hint : hints) {
-			for(Character character : passwordAlphabet.toCharArray()) {
-				if(!hint.contains(character.toString())) {
-					realPasswordAlphabet.remove(character);
-					break;
-				}
-			}
-		}
-
-		return realPasswordAlphabet;
-	}
-
-	private String hash(String line) {
+	private String getHash(String line) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
 			byte[] hashedBytes = digest.digest(String.valueOf(line).getBytes("UTF-8"));
@@ -206,10 +215,6 @@ public class Worker extends AbstractLoggingActor {
 		catch (NoSuchAlgorithmException | UnsupportedEncodingException e) {
 			throw new RuntimeException(e.getMessage());
 		}
-	}
-
-	private interface PermutationCallback {
-		void call(String permutation);
 	}
 
 	// Generating all permutations of an array using Heap's Algorithm
