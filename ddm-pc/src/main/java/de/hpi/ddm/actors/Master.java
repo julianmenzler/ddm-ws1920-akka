@@ -22,14 +22,14 @@ public class Master extends AbstractLoggingActor {
 
     public static final String DEFAULT_NAME = "master";
 
-    public static Props props(final ActorRef reader, final ActorRef collector) {
-        return Props.create(Master.class, () -> new Master(reader, collector));
+    public static Props props(final ActorRef reader, final ActorRef collector, final ActorRef dispatcher) {
+        return Props.create(Master.class, () -> new Master(reader, collector, dispatcher));
     }
 
-    public Master(final ActorRef reader, final ActorRef collector) {
+    public Master(final ActorRef reader, final ActorRef collector, final ActorRef dispatcher) {
         this.reader = reader;
         this.collector = collector;
-        this.workers = new ArrayList<>();
+        this.dispatcher = dispatcher;
     }
 
     ////////////////////
@@ -47,11 +47,6 @@ public class Master extends AbstractLoggingActor {
     public static class BatchMessage implements Serializable {
         private static final long serialVersionUID = 8343040942748609598L;
         private List<String[]> lines;
-    }
-
-    @Data
-    public static class WorkerRegistrationMessage implements Serializable {
-        private static final long serialVersionUID = 3303081601659723997L;
     }
 
     @Data @NoArgsConstructor
@@ -75,8 +70,7 @@ public class Master extends AbstractLoggingActor {
 
     private final ActorRef reader;
     private final ActorRef collector;
-    private final List<ActorRef> workers;
-    private Router workerRouter = new Router(new SmallestMailboxRoutingLogic());
+    private final ActorRef dispatcher;
 
     private long startTime;
 
@@ -106,10 +100,8 @@ public class Master extends AbstractLoggingActor {
         return receiveBuilder()
                 .match(StartMessage.class, this::handle)
                 .match(BatchMessage.class, this::handle)
-                .match(Terminated.class, this::handle)
                 .match(NewHintsMessage.class, this::handle)
                 .match(CollectPasswordMessage.class, this::handle)
-                .match(WorkerRegistrationMessage.class, this::handle)
                 .matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
                 .build();
     }
@@ -117,32 +109,12 @@ public class Master extends AbstractLoggingActor {
     protected void terminate() {
         this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
         this.collector.tell(PoisonPill.getInstance(), ActorRef.noSender());
-
-        for (ActorRef worker : this.workers) {
-            this.context().unwatch(worker);
-            worker.tell(PoisonPill.getInstance(), ActorRef.noSender());
-        }
+        this.dispatcher.tell(new Dispatcher.StopMessage(), this.sender());
 
         this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 
         long executionTime = System.currentTimeMillis() - this.startTime;
         this.log().info("Algorithm finished in {} ms", executionTime);
-    }
-
-    // Handling workers
-
-    protected void handle(WorkerRegistrationMessage message) {
-        this.context().watch(this.sender());
-        this.workers.add(this.sender());
-        workerRouter = workerRouter.addRoutee(this.sender());
-        this.log().info("Registered {}", this.sender());
-    }
-
-    protected void handle(Terminated message) {
-        this.context().unwatch(message.getActor());
-        this.workers.remove(message.getActor());
-        workerRouter = workerRouter.removeRoutee(this.sender());
-        this.log().info("Unregistered {}", message.getActor());
     }
 
 
@@ -165,7 +137,8 @@ public class Master extends AbstractLoggingActor {
                 String hintAlphabet = passwordAlphabet.substring(0, i) + passwordAlphabet.substring(i + 1);
 
                 // Start cracking hints - for each hint alphabet
-                workerRouter.route(new Worker.CrackHintsMessage(hintHashToHint.keySet(), hintAlphabet), this.self());
+
+                dispatcher.tell(new Worker.CrackHintsMessage(new HashSet<>(hintHashToHint.keySet()), hintAlphabet), this.self());
             }
             return;
         }
@@ -198,7 +171,7 @@ public class Master extends AbstractLoggingActor {
             }
 
             // Start cracking the password using hints
-            workerRouter.route(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, passwordLength, clearTextHints), this.self());
+            dispatcher.tell(new Worker.CrackPasswordMessage(passwordAlphabet, passwordHash, passwordLength, clearTextHints), this.self());
         });
     }
 
@@ -218,7 +191,6 @@ public class Master extends AbstractLoggingActor {
     ////////////////////
     // Helper funcs   //
     ////////////////////
-
 
     private void storeLinesInfo(List<String[]> lines) {
 		String passwordHash;
