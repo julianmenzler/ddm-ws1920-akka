@@ -54,14 +54,14 @@ public class Master extends AbstractLoggingActor {
         private static final long serialVersionUID = 3303081601659723997L;
     }
 
-    @Data
+    @Data @NoArgsConstructor
     @AllArgsConstructor
     public static class NewHintsMessage implements Serializable {
         private static final long serialVersionUID = 3303011691659723997L;
         private HashMap<String, String> hints;
     }
 
-    @Data
+    @Data @NoArgsConstructor
     @AllArgsConstructor
     public static class CollectPasswordMessage implements Serializable {
         private static final long serialVersionUID = 3303011691659723997L;

@@ -13,6 +13,7 @@ import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
@@ -46,14 +47,14 @@ public class Worker extends AbstractLoggingActor {
 		private WorkMessage() {}
 	}
 
-	@Data @AllArgsConstructor
+	@Data @NoArgsConstructor @AllArgsConstructor
 	public static class CrackHintsMessage extends WorkMessage implements Serializable {
 		private static final long serialVersionUID = 3303081691659723997L;
 		private Set<String> hintHashes;
 		private String hintAlphabet;
 	}
 
-	@Data @AllArgsConstructor
+	@Data @NoArgsConstructor @AllArgsConstructor
 	public static class CrackPasswordMessage extends WorkMessage implements Serializable {
 		private static final long serialVersionUID = 3203081691659723997L;
 		private String passwordAlphabet;
