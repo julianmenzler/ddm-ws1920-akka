@@ -76,7 +76,7 @@ public class Master extends AbstractLoggingActor {
     private final ActorRef reader;
     private final ActorRef collector;
     private final List<ActorRef> workers;
-    private final Router workerRouter = new Router(new SmallestMailboxRoutingLogic());
+    private Router workerRouter = new Router(new SmallestMailboxRoutingLogic());
 
     private long startTime;
 
@@ -134,13 +134,14 @@ public class Master extends AbstractLoggingActor {
     protected void handle(WorkerRegistrationMessage message) {
         this.context().watch(this.sender());
         this.workers.add(this.sender());
-        workerRouter.addRoutee(this.sender());
+        workerRouter = workerRouter.addRoutee(this.sender());
         this.log().info("Registered {}", this.sender());
     }
 
     protected void handle(Terminated message) {
         this.context().unwatch(message.getActor());
         this.workers.remove(message.getActor());
+        workerRouter = workerRouter.removeRoutee(this.sender());
         this.log().info("Unregistered {}", message.getActor());
     }
 
