@@ -35,11 +35,6 @@ public class Dispatcher extends AbstractLoggingActor {
     }
 
     @Data @AllArgsConstructor
-    public static class CancelMessage implements Serializable {
-        private static final long serialVersionUID = -8332358742629206627L;
-        private Object messageClass;
-    }
-
     @Data @AllArgsConstructor @SuppressWarnings("unused")
     public static class WorkCompletedMessage implements Serializable {
         private static final long serialVersionUID = -6823011111281387872L;
