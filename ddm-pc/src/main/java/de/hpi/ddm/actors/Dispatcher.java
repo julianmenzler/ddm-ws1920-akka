@@ -34,7 +34,8 @@ public class Dispatcher extends AbstractLoggingActor {
         private static final long serialVersionUID = -8330958742629206627L;
     }
 
-    @Data @AllArgsConstructor @SuppressWarnings("unused")
+
+    @Data @AllArgsConstructor
     public static class WorkCompletedMessage implements Serializable {
         private static final long serialVersionUID = -6823011111281387872L;
         public enum status {DONE, FALSE, FAILED}
@@ -84,7 +85,7 @@ public class Dispatcher extends AbstractLoggingActor {
     // Handling workers
 
     protected void handle(WorkerRegistrationMessage message) {
-        this.log().info("Dispatcher Registered {}", this.sender());
+        this.log().info("Registered at Dispatcher {}", this.sender());
         this.context().watch(this.sender());
         this.assign(this.sender());
     }
