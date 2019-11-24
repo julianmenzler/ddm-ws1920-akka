@@ -71,9 +71,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	// Actor Behavior //
 	////////////////////
 
-	private final Serialization serialization = SerializationExtension.get(this.context().system());
-	private final ActorMaterializer mat = ActorMaterializer.create(this.context().system());
-
 	@Override
 	public Receive createReceive() {
 		return receiveBuilder()
@@ -92,11 +89,11 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 
 		// Configure data stream with serialized data
 		final Source<Byte, NotUsed> messageSource = Source.from(Arrays.asList(bytes));
-		final CompletionStage<SourceRef<Byte>> messageRefs = messageSource.runWith(StreamRefs.sourceRef(), this.mat);
+		final SourceRef<Byte> messageRefs = messageSource.runWith(StreamRefs.sourceRef(), this.context().system());
 
 		// Serialize and stream to other proxy actor
-        messageRefs.thenApply(ref -> new BytesMessage(ref, this.sender(), message.receiver) )
-				.thenAccept(result -> receiverProxy.tell(result, this.self()));
+		BytesMessage bytesMessage = new BytesMessage(messageRefs, this.sender(), message.receiver);
+		receiverProxy.tell(bytesMessage, this.self());
 	}
 
 	private byte[] serialize(Object obj) throws IOException {
@@ -117,7 +114,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// Collect the bytes with Sink.seq and move them into a list to be serialized
 		final SourceRef<Byte> sourceRef = message.bytes;
 		final Source<Byte, NotUsed> source = sourceRef.getSource();
-		final CompletionStage<List<Byte>> bytesCompletion = source.runWith(Sink.seq(), mat);
+		final CompletionStage<List<Byte>> bytesCompletion = source.runWith(Sink.seq(), this.context().system());
 
 		// Deserialize and forward to receiver
         bytesCompletion.thenAccept(result -> {
