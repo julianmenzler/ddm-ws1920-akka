@@ -7,20 +7,23 @@ import akka.actor.ActorSelection;
 import akka.actor.Props;
 import akka.serialization.Serialization;
 import akka.serialization.SerializationExtension;
-import akka.serialization.Serializers;
 import akka.stream.ActorMaterializer;
 import akka.stream.SourceRef;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.StreamRefs;
-import de.hpi.ddm.structures.KryoPoolSingleton;
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.apache.commons.lang3.ArrayUtils;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.Serializable;
-import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
@@ -52,7 +55,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		private  SourceRef<Byte> bytes;
-		private  Class klass;
 		private  ActorRef sender;
 		private  ActorRef receiver;
 	}
@@ -81,20 +83,34 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 				.build();
 	}
 
-	private void handle(LargeMessage<?> message) {
+	private void handle(LargeMessage<?> message) throws IOException {
 		// Configure proxy actors
 		ActorSelection receiverProxy = this.context().actorSelection(message.receiver.path().child(DEFAULT_NAME));
 
 		// Serialization
-		Byte[] bytes = ArrayUtils.toObject(this.serialization.serialize(message.message).get());
+		Byte[] bytes = ArrayUtils.toObject(serialize(message.message));
 
 		// Configure data stream with serialized data
 		final Source<Byte, NotUsed> messageSource = Source.from(Arrays.asList(bytes));
 		final CompletionStage<SourceRef<Byte>> messageRefs = messageSource.runWith(StreamRefs.sourceRef(), this.mat);
 
 		// Serialize and stream to other proxy actor
-        messageRefs.thenApply(ref -> new BytesMessage(ref, message.getClass(), this.sender(), message.receiver) )
+        messageRefs.thenApply(ref -> new BytesMessage(ref, this.sender(), message.receiver) )
 				.thenAccept(result -> receiverProxy.tell(result, this.self()));
+	}
+
+	private byte[] serialize(Object obj) throws IOException {
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		Output output = new Output(outputStream);
+        new Kryo().writeClassAndObject(output, obj);
+		output.close();
+		byte[] buffer = outputStream.toByteArray();
+		outputStream.close();
+		return buffer;
+	}
+
+	private Object deserialize(byte[] bytes) {
+		return new Kryo().readClassAndObject(new Input(new ByteArrayInputStream(bytes)));
 	}
 
 	private void handle(BytesMessage message) {
@@ -106,7 +122,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// Deserialize and forward to receiver
         bytesCompletion.thenAccept(result -> {
             byte[] bytes = ArrayUtils.toPrimitive(result.toArray(new Byte[result.size()]));
-            Object object = this.serialization.deserialize(bytes, message.klass);
+            Object object = this.deserialize(bytes);
             message.receiver.tell(object, message.sender);
         });
 	}
