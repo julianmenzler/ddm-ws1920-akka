@@ -7,9 +7,6 @@ import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
-import akka.actor.Terminated;
-import akka.routing.Router;
-import akka.routing.SmallestMailboxRoutingLogic;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -47,6 +44,11 @@ public class Master extends AbstractLoggingActor {
     public static class BatchMessage implements Serializable {
         private static final long serialVersionUID = 8343040942748609598L;
         private List<String[]> lines;
+    }
+
+    @Data
+    public static class ResultsPrintedMessage implements Serializable {
+        private static final long serialVersionUID = 8343040942748609600L;
     }
 
     @Data @NoArgsConstructor
@@ -100,6 +102,7 @@ public class Master extends AbstractLoggingActor {
         return receiveBuilder()
                 .match(StartMessage.class, this::handle)
                 .match(BatchMessage.class, this::handle)
+                .match(ResultsPrintedMessage.class, this::handle)
                 .match(NewHintsMessage.class, this::handle)
                 .match(CollectPasswordMessage.class, this::handle)
                 .matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
@@ -151,6 +154,10 @@ public class Master extends AbstractLoggingActor {
         this.reader.tell(new Reader.ReadMessage(), this.self());
     }
 
+    protected void handle(ResultsPrintedMessage message) {
+        this.terminate();
+    }
+
     // Logic - Worker Results
 
     private void handle(NewHintsMessage message) {
@@ -183,7 +190,6 @@ public class Master extends AbstractLoggingActor {
         // All password were found
         if (passwordHashToPassword.size() == passwordsFound) {
             this.collector.tell(new Collector.PrintMessage(), this.self());
-            this.terminate();
         }
     }
 
