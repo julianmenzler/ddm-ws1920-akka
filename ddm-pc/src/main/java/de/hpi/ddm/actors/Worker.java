@@ -8,6 +8,7 @@ import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.Member;
 import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
+import de.hpi.ddm.actors.Dispatcher.WorkCompletedMessage;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -153,7 +154,7 @@ public class Worker extends AbstractLoggingActor {
 		});
 
 		this.sender().tell(new Master.NewHintsMessage(hints), this.self());
-		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(), this.self());
+		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
 	}
 
 	private void handle(CrackPasswordMessage message) {
@@ -162,7 +163,7 @@ public class Worker extends AbstractLoggingActor {
 				(potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
 
 		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
-		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(), this.self());
+		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
 	}
 
 	////////////////////

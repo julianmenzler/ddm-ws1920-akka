@@ -41,7 +41,7 @@ public class MasterSystem {
 
 		ActorRef dispatcher = system.actorOf(Dispatcher.props(), Dispatcher.DEFAULT_NAME);
 
-		ActorRef master = system.actorOf(Master.props(reader, dispatcher, collector), Master.DEFAULT_NAME);
+		ActorRef master = system.actorOf(Master.props(reader, collector, dispatcher), Master.DEFAULT_NAME);
 
 		Cluster.get(system).registerOnMemberUp(new Runnable() {
 			@Override
