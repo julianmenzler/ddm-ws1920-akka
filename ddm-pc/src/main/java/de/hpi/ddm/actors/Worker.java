@@ -1,9 +1,6 @@
 package de.hpi.ddm.actors;
 
-import akka.actor.AbstractLoggingActor;
-import akka.actor.ActorRef;
-import akka.actor.PoisonPill;
-import akka.actor.Props;
+import akka.actor.*;
 import akka.cluster.Cluster;
 import akka.cluster.ClusterEvent.CurrentClusterState;
 import akka.cluster.ClusterEvent.MemberRemoved;
@@ -11,15 +8,23 @@ import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.Member;
 import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
+import de.hpi.ddm.actors.Dispatcher.WorkCompletedMessage;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.FiniteDuration;
 
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class Worker extends AbstractLoggingActor {
 
@@ -68,6 +73,7 @@ public class Worker extends AbstractLoggingActor {
 	// Actor State //
 	/////////////////
 
+	private ActorRef dispatcher;
 	private Member masterSystem;
 	private final Cluster cluster;
 
@@ -117,17 +123,23 @@ public class Worker extends AbstractLoggingActor {
 	private void register(Member member) {
 		if ((this.masterSystem == null) && member.hasRole(MasterSystem.MASTER_ROLE)) {
 			this.masterSystem = member;
-			
-			this.getContext()
-				.actorSelection(member.address() + "/user/" + Master.DEFAULT_NAME)
-				.tell(new Master.WorkerRegistrationMessage(), this.self());
+
+			Optional<ActorRef> ref = findActor(member.address() + "/user/" + Dispatcher.DEFAULT_NAME);
+			if(ref.isPresent()) {
+				dispatcher = ref.get();
+				dispatcher.tell(new Dispatcher.WorkerRegistrationMessage(), this.self());
+			} else {
+				this.log().error("Worker could not find Dispatcher-ActorRef");
+			}
 		}
 	}
-	
+
 	private void handle(MemberRemoved message) {
 		if (this.masterSystem.equals(message.member()))
 			this.self().tell(PoisonPill.getInstance(), ActorRef.noSender());
 	}
+
+	// Handle work messages
 
 	private void handle(CrackHintsMessage message) {
 		HashMap<String, String> hints = new HashMap<>();
@@ -142,13 +154,19 @@ public class Worker extends AbstractLoggingActor {
 		});
 
 		this.sender().tell(new Master.NewHintsMessage(hints), this.self());
+		this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
 	}
 
 	private void handle(CrackPasswordMessage message) {
 		Set<Character> passwordAlphabet = determinePasswordAlphabetFromHints(message.passwordAlphabet, message.hints);
-		String password = crackPassword(passwordAlphabet, "", message.passwordLength,
-				(potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
-		this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, password), this.self());
+		Optional<String> password = crackPassword(passwordAlphabet, message.passwordLength, (potentialPassword) -> getHash(potentialPassword).equals(message.passwordHash));
+
+		password.ifPresent((p) -> {
+			this.sender().tell(new Master.CollectPasswordMessage(message.passwordHash, p), this.self());
+			this.dispatcher.tell(new Dispatcher.WorkCompletedMessage(WorkCompletedMessage.status.DONE), this.self());
+		});
+
+		password.orElseThrow(NullPointerException::new);
 	}
 
 	////////////////////
@@ -181,20 +199,24 @@ public class Worker extends AbstractLoggingActor {
 		return realPasswordAlphabet;
 	}
 
-	private String crackPassword(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
+	private Optional<String> crackPassword(Set<Character> alphabet, int k, Cracker cracker) {
+		return crackPasswordRecursion(alphabet, "", k, cracker);
+	}
+
+	private Optional<String> crackPasswordRecursion(Set<Character> alphabet, String prefix, int k, Cracker cracker) {
 		if (k == 0) {
 			if (cracker.checkHash(prefix)) {
 				// We found the password!
-				return prefix;
+				return Optional.of(prefix);
 			} else {
-				return null;
+				return Optional.empty();
 			}
 		}
 
 		for (Character character : alphabet) {
 			String newPrefix = prefix + character;
-			String password = crackPassword(alphabet, newPrefix, k - 1, cracker);
-			if (password != null) {
+			Optional<String> password = crackPasswordRecursion(alphabet, newPrefix, k - 1, cracker);
+			if (!password.isPresent()) {
 				return password;
 			}
 		}
@@ -244,4 +266,18 @@ public class Worker extends AbstractLoggingActor {
 			}
 		}
 	}
+
+	public synchronized Optional<ActorRef> findActor(final String path) {
+		FiniteDuration timeout = FiniteDuration.apply(30, TimeUnit.SECONDS);
+		final ActorSelection sel = this.context().actorSelection(path);
+
+		try {
+			final Future<ActorRef> fut = sel.resolveOne(timeout);
+			final ActorRef ref = Await.result(fut, timeout);
+			return Optional.of(ref);
+		} catch (final Exception e) {
+			return Optional.empty();
+		}
+	}
+
 }
