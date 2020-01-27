@@ -71,7 +71,7 @@ object Sindy {
       .toDF("attribute", "attributeSet")
       .as[Inclusion]
       .filter(inclusionList => inclusionList.attributeSet.nonEmpty)
-      .map(inclusionList => (inclusionList.attribute, inclusionList.attributeSet.sorted))
+     // .map(inclusionList => (inclusionList.attribute, inclusionList.attributeSet.sorted))
       .toDF("attribute", "attributeSet")
       .collect()
       .sortBy(r => r.getString(0)) //TODO: Ordering in spark does not work
