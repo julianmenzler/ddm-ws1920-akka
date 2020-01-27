@@ -61,6 +61,7 @@ object Sindy {
 
     // Build result list by collecting attribute sets and
     // merging them using the intersection
+    //
     val results = inclusionLists
       .groupBy(inclusionLists.columns(0))
       .agg(collect_set(inclusionLists.columns(1)))
@@ -70,14 +71,18 @@ object Sindy {
       .toDF("attribute", "attributeSet")
       .as[Inclusion]
       .filter(inclusionList => inclusionList.attributeSet.nonEmpty)
-      .orderBy(col("attribute").desc)
-
-    // TODO: Ordering in spark does not work
-    var r = results.coll
-
+      .map(inclusionList => (inclusionList.attribute, inclusionList.attributeSet.sorted))
+      .toDF("attribute", "attributeSet")
+      .collect()
+      .sortBy(r => r.getString(0)) //TODO: Ordering in spark does not work
 
     // Print results in desired format
-    results.foreach(result => println(s"${result.attribute} < ${result.attributeSet.mkString(", ")}"))
+
+    for (result <- results) {
+      println(s"${result.getString(0)} < ${result.get(1).asInstanceOf[Seq[String]].mkString(", ")}")
+    }
+
+    // Print results in desired format
   }
 }
 
